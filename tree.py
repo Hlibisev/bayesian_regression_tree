@@ -15,7 +15,7 @@ class DecisionTreeNode:
         self.prior = prior
         self.posterior = None
 
-    def define(self, split_dim, split_value, left, right, posterior):
+    def define(self, split_dim, split_value, left, right):
         self.split_dim = split_dim
         self.split_value = split_value
         self.left = left
@@ -26,38 +26,27 @@ class DecisionTreeNode:
 
 
 class BayesianDecisionTree:
-    def __init__(self,  max_depth: int = 20, min_samples_leaf: int = 1,
-                 max_iter: int = np.inf, feat_bag: bool = False, freq_feat_bag: float = None, partition_prior=0.9):
+    def __init__(self,  max_depth: int = 20, min_samples_leaf: int = 1, partition_prior=0.9, prior=[10, 10, 10, 100]):
         """
         :param max_depth: max depth of tree
         :param min_samples_leaf: how many samples should be at leaf to avoid separation
-        :param max_iter: max iterations at finding best split values
-        :param feat_bag: use feature bagging?
-        :param freq_feat_bag: what part of feature is used at separation. Basically sqrt(num_feat)
         """
         self.root = None
         self.min_samples_leaf = min_samples_leaf
         self.max_depth = max_depth if max_depth is not None else np.inf
-        self.max_iter = max_iter
-        self.feat_bag = feat_bag
-        self.freq_feat_bag = freq_feat_bag
         self.number_feat_bag = None
         self.partition_prior = partition_prior
+        self.prior = prior
 
     def fit(self, X, y):
-        if self.freq_feat_bag is None:
-            self.number_feat_bag = int(np.sqrt(X.shape[1]))
-        else:
-            self.number_feat_bag = int(X.shape[1] * self.freq_feat_bag)
-
-        self.root = DecisionTreeNode(ind=np.arange(len(X)))
+        self.root = DecisionTreeNode(ind=np.arange(len(X)), prior=self.prior)
         viewed_nodes = {self.root}  # type: Set[DecisionTreeNode]
 
         while viewed_nodes:
             new_nodes = set()
             for node in viewed_nodes:
                 if node.size > 2 * self.min_samples_leaf and node.depth < self.max_depth:
-                    split_dim, split_value, posterior_left, posterior_right = self.find_split_and_posteriors(X[node.ind], y[node.ind], node)
+                    split_dim, split_value = self.find_split(X[node.ind], y[node.ind], node)
 
                     # if partition was not happened , this node is leaf
                     if split_dim is None:
@@ -68,10 +57,12 @@ class BayesianDecisionTree:
                     left_ind, right_ind = node.ind[sep], node.ind[~sep]
 
                     left, right = self.make_nodes(node, split_dim, split_value, left_ind,
-                                                  right_ind, posterior_left, posterior_right)
+                                                  right_ind, node.prior, node.prior)
 
                     new_nodes.add(left)
                     new_nodes.add(right)
+                else:
+                    node.posterior = self.get_posterior(node, y[node.ind])
             viewed_nodes = new_nodes
 
     @staticmethod
@@ -81,15 +72,11 @@ class BayesianDecisionTree:
         node.define(split_dim, split_value, left, right)
         return left, right
 
-    def predict_proba(self, X):
+    def predict(self, X):
         ind = np.arange(len(X))
         return self._traversal(X, ind, self.root)
 
-    def predict(self, X):
-        probabilities = self.predict_proba(X)
-        return [max(p.keys(), key=lambda k: p[k]) for p in probabilities]
-
-    def find_split_and_posteriors(self, X: np.ndarray, y: np.ndarray, node: DecisionTreeNode):
+    def find_split(self, X: np.ndarray, y: np.ndarray, node: DecisionTreeNode):
         best_log_data = self.get_log_p_data_before_split(node, y)
         split_dim, split_value, best_posterior_left, best_posterior_right = None, None, None, None
 
@@ -99,36 +86,31 @@ class BayesianDecisionTree:
             X_f_sorted_by_feature = X[X_sorted_indexes, feature]
             y_sorted_by_feature = y[X_sorted_indexes]
 
-            values_X, indexes_of_unique = np.unique(X_f_sorted_by_feature, return_index=True)
+            indexes_of_unique = np.unique(X_f_sorted_by_feature, return_index=True)[1][1:]
+            n_splits = len(indexes_of_unique)
 
-            # max iterations is equal max_iters
-            if len(values_X) > self.max_iter:
-                indexes = sorted(np.random.choice(len(values_X), self.max_iter, replace=False))
-            else:
-                indexes = indexes_of_unique
-
-            n = len(y)
-            n_splits = len(indexes)
-
-            posterior_left, posterior_right = self.get_posteriors_for_split_node(node, y_sorted_by_feature, indexes)
-            log_p_data_after_split = self.get_log_p_data_after_split(node, posterior_left, posterior_right, n_splits, n)
+            posterior_left, posterior_right = self.get_posteriors_for_split_node(node, y_sorted_by_feature, indexes_of_unique)
+            log_p_data_after_split = self.get_log_p_data_after_split(node, posterior_left, posterior_right,
+                                                                     n_splits, n_features, len(X_sorted_indexes))
             index_max = log_p_data_after_split.argmax()
 
             if log_p_data_after_split[index_max] > best_log_data:
+
                 # remember new best split
                 best_log_data = log_p_data_after_split[index_max]
-                split_value = y_sorted_by_feature[index_max - 1: index_max].mean()
+                split_value = X_f_sorted_by_feature[indexes_of_unique[index_max]]
                 split_dim = feature
-                best_posterior_left, best_posterior_right = posterior_left, posterior_right
 
-        return split_dim, split_value, best_posterior_left, best_posterior_right
+        return split_dim, split_value
+
+    @staticmethod
+    def _mean_predict(node):
+        return node.posterior[0]
 
     def _traversal(self, X, ind, node):
         if node.is_leaf():
-            values, counts = np.unique(self.y[node.ind], return_counts=True)
-            freq = counts / sum(counts)
-            predict = dict(zip(values, freq))
-            return [predict for _ in range(len(ind))]
+            mean_predict = self._mean_predict(node)
+            return np.zeros_like(ind) + mean_predict
 
         separation = X[ind, node.split_dim] < node.split_value
         left_ind, right_ind = ind[separation], ind[~separation]
@@ -172,8 +154,7 @@ class BayesianDecisionTree:
 
         return log_p_prior + log_p_data
 
-    def get_log_p_data_after_split(self, node: DecisionTreeNode, posterior_for_left_node, posterior_for_right_node, n_splits, n_dim):
-        n = len(y)
+    def get_log_p_data_after_split(self, node: DecisionTreeNode, posterior_for_left_node, posterior_for_right_node, n_splits, n_dim, n):
         n1 = np.arange(1, n)
         n2 = n - n1
 
@@ -220,10 +201,18 @@ class BayesianDecisionTree:
         return mean_y, variance_y_mul_n
 
 
+from sklearn.metrics import mean_absolute_error as mae
 
-X = np.array([1, 1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape(-1, 2)
-y = np.array([1, 2, 3, 4, 5])
-print(X.shape, y.shape)
-tree = BayesianDecisionTree()
-tree.fit(X, y)
+if __name__ == "__main__":
+    # [ 2.33333333 23.          2.33333333 23.          0.95      ]
+    # X = np.array([[1, 3], [3, 4], [5, 0.6], [7, 8], [9, 0.10]])
+    # y = X[:, 0] * X[:, 1]
 
+    X = np.random.rand(2000, 5) * 10
+    y = X[:, 1] * X[:, 2] - X[:, 3] + np.sin(X[:, 4])
+
+    prior = [10, 1, 1, 1]
+    tree = BayesianDecisionTree()
+    tree.fit(X, y)
+    print(mae(y, tree.predict(X)))
+    # print(tree.predict(X))
