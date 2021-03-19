@@ -26,7 +26,7 @@ class DecisionTreeNode:
 
 
 class BayesianDecisionTree:
-    def __init__(self,  max_depth: int = 20, min_samples_leaf: int = 1, partition_prior=(0.9, 30), prior=(10, 10, 10, 100)):
+    def __init__(self,  max_depth: int = 20, min_samples_leaf: int = 1, partition_prior=(0.9, 30), prior=None):
         """
         :param max_depth: max depth of tree
         :param min_samples_leaf: how many samples should be at leaf to avoid separation
@@ -41,6 +41,9 @@ class BayesianDecisionTree:
     def fit(self, X, y):
         self.root = DecisionTreeNode(ind=np.arange(len(X)), prior=self.prior)
         viewed_nodes = {self.root}  # type: Set[DecisionTreeNode]
+
+        if self.prior is None:
+            self.root = self.set_prior(y)
 
         while viewed_nodes:
             new_nodes = set()
@@ -60,16 +63,16 @@ class BayesianDecisionTree:
                         node.posterior = self.get_posterior(node, y[node.ind])
                         continue
 
-                    posterior_left = self.get_posterior(node, y[left_ind])
-                    posterior_right = self.get_posterior(node, y[right_ind])
+                    # posterior_left = self.get_posterior(node, y[left_ind])
+                    # posterior_right = self.get_posterior(node, y[right_ind])
                     # posterior_left = tuple([y[left_ind].mean()]) + posterior_left[1:]
                     # posterior_right = tuple([y[right_ind].mean()]) + posterior_right[1:]
 
                     # left, right = self.make_nodes(node, split_dim, split_value, left_ind,
                                                   # right_ind, node.prior, node.prior)
 
-                    prior_left = self.set_prior(y, node)
-                    prior_right = self.set_prior(y, node)
+                    prior_left = self.set_prior(y[node.ind])
+                    prior_right = self.set_prior(y[node.ind])
 
                     left, right = self.make_nodes(node, split_dim, split_value, left_ind,
                                                   right_ind, prior_left, prior_right)
@@ -222,8 +225,8 @@ class BayesianDecisionTree:
         variance_y_mul_n = ((y - mean_y) ** 2).sum()
         return mean_y, variance_y_mul_n
 
-    def set_prior(self, y, node):
-        mu = (y.mean() + node.prior[0])/2
+    def set_prior(self, y):
+        mu = y.mean()
         sd_prior = y.std() / 10
         prior_obs = 1
         kappa = prior_obs
@@ -254,7 +257,7 @@ if __name__ == "__main__":
 
     prior = [mu, kappa, alpha, beta]
 
-    tree = BayesianDecisionTree()
+    tree = BayesianDecisionTree(prior=prior, partition_prior=partition)
     tree.fit(X, y)
     print(mae(y, tree.predict(X)))
     # print(tree.predict(X))
