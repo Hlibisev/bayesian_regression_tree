@@ -43,7 +43,7 @@ class BayesianDecisionTree:
         viewed_nodes = {self.root}  # type: Set[DecisionTreeNode]
 
         if self.prior is None:
-            self.root = self.set_prior(y)
+            self.root.prior = self.set_prior(y)
 
         while viewed_nodes:
             new_nodes = set()
@@ -106,8 +106,12 @@ class BayesianDecisionTree:
 
             indexes_of_unique = np.unique(X_f_sorted_by_feature, return_index=True)[1][1:]
 
+            if len(indexes_of_unique) == 0:
+                continue
+
             posterior_left, posterior_right = self.get_posteriors_for_split_node(node, y_sorted_by_feature, indexes_of_unique)
-            log_p_data_after_split = self.get_log_p_data_after_split(node, posterior_left, posterior_right, len(X_sorted_indexes))
+            log_p_data_after_split = self.get_log_p_data_after_split(node, posterior_left, posterior_right,
+                                                                     len(X_sorted_indexes), indexes_of_unique)
             index_max = log_p_data_after_split.argmax()
 
             if log_p_data_after_split[index_max] > best_log_data:
@@ -179,8 +183,8 @@ class BayesianDecisionTree:
             return np.log(depth_penalty * samples_penalty1 * samples_penalty2)
         return np.log(depth_penalty * samples_penalty1)
 
-    def get_log_p_data_after_split(self, node: DecisionTreeNode, posterior_for_left_node, posterior_for_right_node, n):
-        n1 = np.arange(1, n)
+    def get_log_p_data_after_split(self, node: DecisionTreeNode, posterior_for_left_node, posterior_for_right_node, n, split_indexs):
+        n1 = split_indexs
         n2 = n - n1
 
         mu1, kappa1, alpha1, beta1 = posterior_for_left_node
@@ -206,7 +210,6 @@ class BayesianDecisionTree:
         if len(split_indices) != len(y) - 1:
             # we are *not* splitting between all data points -> indexing necessary
             split_indices_minus_1 = split_indices - 1
-
             n1 = n1[split_indices_minus_1]
             n2 = n2[split_indices_minus_1]
             mean1 = mean1[split_indices_minus_1]
@@ -228,7 +231,7 @@ class BayesianDecisionTree:
     def set_prior(self, y):
         mu = y.mean()
         sd_prior = y.std() / 10
-        prior_obs = 1
+        prior_obs = 3
         kappa = prior_obs
         alpha = prior_obs / 2
         var_prior = sd_prior ** 2
@@ -236,28 +239,52 @@ class BayesianDecisionTree:
         beta = alpha / tau_prior
         return mu, kappa, alpha, beta
 
+
 from sklearn.metrics import mean_absolute_error as mae
-
+from sklearn.model_selection import train_test_split
 if __name__ == "__main__":
-    # [ 2.33333333 23.          2.33333333 23.          0.95      ]
-    n_data = 300
+    partition = (0.9, 40)
+    train_X = np.array([  [6., 7., 7., 6.],
+                   [2., 1., 4., 5.],
+                   [6., 5., 6., 6.],
+                   [7., 6., 5., 5.],
+                   [5., 4., 5., 5.],
+                   [7., 8., 6., 7.],
+                   [6., 5., 6., 7.],
+                   [5., 5., 6., 6.],
+                   [6., 5., 5., 6.],
+                   [5., 5., 5., 5.],
+                   [7., 7., 6., 6.],
+                   [7., 6., 7., 7.],
+                   [8., 8., 7., 6.],
+                   [3., 4., 5., 6.],
+                   [5., 3., 5., 6.],
+                   [4., 4., 5., 5.],
+                   [5., 5., 5., 5.],
+                   [6., 6., 6., 6.],
+                   [5., 3., 6., 7.],
+                   [6., 7., 6., 6.],
+                   [4., 4., 5., 7.],
+                   [5., 5., 6., 5.],
+                   [7., 6., 6., 6.],
+                   [5., 5., 5., 6.],
+                   [6., 6., 7., 6.],
+                   [8., 6., 7., 6.],
+                   [4., 3., 3., 3.],
+                   [6., 7., 6., 6.],
+                   [7., 5., 7., 7.],
+                   [3., 3., 4., 5.]])
+    train_y = np.array([7., 2., 6., 5., 4., 7., 6., 5., 6., 5., 6., 7., 8., 4., 4., 3., 5., 6., 6., 6., 5., 5., 6., 5., 6., 8., 3., 6., 7., 4.])
+    b_tree = BayesianDecisionTree(partition_prior=partition)
+    b_tree.fit(train_X, train_y)
+    # for regression_dataset in tqdm(regression_dataset_names):
+    #     X, y = fetch_data(regression_dataset, return_X_y=True)
+    #     train_X, test_X, train_y, test_y = train_test_split(X, y)
+    #
+    #     b_tree = BayesianDecisionTree(partition_prior=partition)
+    #
+    #     b_tree.fit(train_X, train_y)
+    #
+    #     b_tree_test_scores.append(mse(b_tree.predict(test_X), test_y))
 
-    X = np.linspace(-1, 3, n_data).reshape(-1, 1)
-    y = X[:, 0] ** 2 - X[:, 0] + np.random.rand(n_data) + np.cos(X[:, 0])
-
-    mu = y.mean()
-    sd_prior = y.std()
-    prior_obs = 2
-    kappa = prior_obs
-    alpha = prior_obs / 2
-    var_prior = sd_prior ** 2
-    tau_prior = 1 / var_prior
-    beta = alpha / tau_prior
-    partition = (0.9, 10)
-
-    prior = [mu, kappa, alpha, beta]
-
-    tree = BayesianDecisionTree(prior=prior, partition_prior=partition)
-    tree.fit(X, y)
-    print(mae(y, tree.predict(X)))
     # print(tree.predict(X))
