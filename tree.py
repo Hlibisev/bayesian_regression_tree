@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.special import gammaln
 from typing import Set
+from scipy.stats import norm
 
 
 class DecisionTreeNode:
@@ -63,16 +64,16 @@ class BayesianDecisionTree:
                         node.posterior = self.get_posterior(node, y[node.ind])
                         continue
 
-                    # posterior_left = self.get_posterior(node, y[left_ind])
-                    # posterior_right = self.get_posterior(node, y[right_ind])
-                    # posterior_left = tuple([y[left_ind].mean()]) + posterior_left[1:]
-                    # posterior_right = tuple([y[right_ind].mean()]) + posterior_right[1:]
+                    prior_left = self.get_posterior(node, y[left_ind])
+                    prior_right = self.get_posterior(node, y[right_ind])
+                    prior_left = tuple([y[left_ind].mean()]) + prior_left[1:]
+                    prior_right = tuple([y[right_ind].mean()]) + prior_right[1:]
 
                     # left, right = self.make_nodes(node, split_dim, split_value, left_ind,
                                                   # right_ind, node.prior, node.prior)
 
-                    prior_left = self.set_prior(y[node.ind])
-                    prior_right = self.set_prior(y[node.ind])
+                    # prior_left = self.set_prior(y[node.ind])
+                    # prior_right = self.set_prior(y[node.ind])
 
                     left, right = self.make_nodes(node, split_dim, split_value, left_ind,
                                                   right_ind, prior_left, prior_right)
@@ -118,6 +119,7 @@ class BayesianDecisionTree:
 
                 # remember new best split
                 best_log_data = log_p_data_after_split[index_max]
+
                 # split_value = X_f_sorted_by_feature[indexes_of_unique[index_max] - 1: indexes_of_unique[index_max]].mean()
                 split_value = X_f_sorted_by_feature[indexes_of_unique[index_max: index_max + 1]].mean()
                 split_dim = feature
@@ -230,8 +232,8 @@ class BayesianDecisionTree:
 
     def set_prior(self, y):
         mu = y.mean()
-        sd_prior = y.std() / 10
-        prior_obs = 3
+        sd_prior = y.std()
+        prior_obs = 1
         kappa = prior_obs
         alpha = prior_obs / 2
         var_prior = sd_prior ** 2
